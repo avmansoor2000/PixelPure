@@ -1,0 +1,4 @@
+Sample source photos from the scikit-image data set:
+- rocket.jpg  — SpaceX, released into the public domain
+- chelsea.png — CC0, Stefan van der Walt
+- coffee.png  — CC0, Rachel Michetti
