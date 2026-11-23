@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: pixelpure
+    runtime: node
+    plan: free
+    branch: master
+    buildCommand: npm install && npm run build:pages
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "true"
+      - key: ALLOW_LOCAL_FALLBACK
+        value: "true"
+      - key: INPAINT_PROVIDER
+        value: auto
+      - key: ENHANCE_PROVIDER
+        value: auto
+      - key: FILE_TTL_MINUTES
+        value: "60"
+      - key: CLEANUP_INTERVAL_MINUTES
+        value: "5"
+      - key: STABILITY_API_KEY
+        sync: false
+      - key: CLIPDROP_API_KEY
+        sync: false
+      - key: REPLICATE_API_TOKEN
+        sync: false
