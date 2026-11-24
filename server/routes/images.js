@@ -119,6 +119,29 @@ router.post('/images/:id/inpaint', processLimiter, upload.single('mask'), async 
   }
 });
 
+// ---------- detect Gemini visible watermark ----------
+router.get('/images/:id/detect-gemini', processLimiter, async (req, res, next) => {
+  try {
+    if (!storage.isValidId(req.params.id)) throw new AppError(404, 'NOT_FOUND', 'Image not found.');
+    const result = await processor.detectGemini(req.params.id);
+    res.json(result);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ---------- remove Gemini visible watermark ----------
+router.post('/images/:id/remove-gemini', processLimiter, express.json({ limit: '2kb' }), async (req, res, next) => {
+  try {
+    if (!storage.isValidId(req.params.id)) throw new AppError(404, 'NOT_FOUND', 'Image not found.');
+    const detection = req.body && req.body.bbox ? req.body : null;
+    const rec = await processor.removeGemini(req.params.id, detection);
+    res.status(201).json({ image: publicRecord(rec) });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ---------- enhance / upscale ----------
 router.post('/images/:id/enhance', processLimiter, express.json({ limit: '2kb' }), async (req, res, next) => {
   try {

@@ -79,6 +79,16 @@ export async function inpaint(imageId, maskBlob, onProgress) {
   return data.image;
 }
 
+export async function detectGemini(imageId) {
+  const { data } = await xhr('GET', `/api/images/${imageId}/detect-gemini`);
+  return data;
+}
+
+export async function removeGemini(imageId, detection = null) {
+  const { data } = await xhr('POST', `/api/images/${imageId}/remove-gemini`, detection || {});
+  return data.image;
+}
+
 export async function enhance(imageId, options) {
   const { data } = await xhr('POST', `/api/images/${imageId}/enhance`, options);
   return data.image;

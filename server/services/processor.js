@@ -112,4 +112,31 @@ async function enhance(sourceId, { scale = 2, denoise = true, autoLight = true, 
   });
 }
 
-module.exports = { inpaint, enhance, computeTarget };
+const geminiService = require('./geminiService');
+
+async function detectGemini(sourceId) {
+  const { meta, buffer } = await loadSource(sourceId);
+  const det = await geminiService.detect(buffer);
+  return { ...det, imageWidth: meta.width, imageHeight: meta.height };
+}
+
+async function removeGemini(sourceId, detection = null) {
+  const { meta, buffer } = await loadSource(sourceId);
+  const started = Date.now();
+  return withSlot(async () => {
+    const cleaned = await geminiService.remove(buffer, detection);
+    return storage.save(cleaned, {
+      width: meta.width,
+      height: meta.height,
+      kind: 'gemini-remove',
+      parentId: sourceId,
+      originalName: meta.originalName,
+      provider: 'gemini-math',
+      providerLabel: 'Gemini Reverse-Alpha (Lossless)',
+      isAI: false,
+      processingMs: Date.now() - started,
+    });
+  });
+}
+
+module.exports = { inpaint, enhance, computeTarget, detectGemini, removeGemini };

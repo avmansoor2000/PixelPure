@@ -357,6 +357,20 @@
       </aside>
 
       <section class="ed-stage-wrap">
+        <div class="gemini-banner" id="gemini-banner" hidden>
+          <div class="gb-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7L21 12l-6.2 3.3L12 21l-2.8-5.7L3 12l6.2-3.3L12 3z" fill="currentColor"/></svg>
+          </div>
+          <div class="gb-content">
+            <strong>Gemini Watermark Detected</strong>
+            <span class="muted small" id="gb-info">Found in bottom-right corner</span>
+          </div>
+          <div class="gb-actions">
+            <button class="btn btn-primary btn-sm" id="btn-clean-gemini" type="button">Clean Losslessly</button>
+            <button class="btn btn-ghost btn-sm" id="btn-preview-gemini" type="button">Highlight</button>
+            <button class="icon-btn" id="btn-dismiss-gemini" title="Dismiss" type="button" style="width: 28px; height: 28px; min-height: 28px;">&times;</button>
+          </div>
+        </div>
         <div class="ed-stage" id="stage" data-tool="brush">
           <div class="ed-canvas-wrap" id="canvas-wrap">
             <img id="base-img" alt="Image being edited" draggable="false">
@@ -393,7 +407,11 @@
       <aside class="ed-panel" aria-label="Actions">
         <div class="panel-card">
           <h3>Remove watermark</h3>
-          <p class="muted small">Brush over the watermark, text or object, then remove it.</p>
+          <p class="muted small">Brush over any watermark or object, or use automatic Gemini detection.</p>
+          <button class="btn btn-gemini btn-block" data-ed="detect-gemini" id="btn-detect-gemini" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true" class="sparkle-icon"><path d="m12 3 2.8 5.7L21 12l-6.2 3.3L12 21l-2.8-5.7L3 12l6.2-3.3L12 3z" fill="currentColor"/></svg>
+            Auto-Detect Gemini Mark
+          </button>
           <button class="btn btn-primary btn-block" data-ed="inpaint" id="btn-inpaint" disabled>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 19 9-9m-6-5 1 2 2 1-2 1-1 2-1-2-2-1 2-1zm10 0 .7 1.3L19 7l-1.3.7L17 9l-.7-1.3L15 7l1.3-.7zM14 10l2 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Remove Watermark

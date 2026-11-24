@@ -27,6 +27,7 @@ export class Editor {
     this.format = 'png';
     this.view = 'edit';
     this.busy = false;
+    this.lastGeminiDetection = null;
     this.compare = new Compare($('#editor-compare'), {
       zoomable: true,
       onZoom: (s) => ($('#cmp-zoom-label').textContent = `${Math.round(s * 100)}%`),
@@ -118,6 +119,14 @@ export class Editor {
     this.layout();
     this.wrap.style.visibility = '';
     this.updateUi();
+
+    // Auto-detect Gemini watermark on original uploads
+    if (this.active && this.active.cur === 0) {
+      this.detectGeminiWatermark(false);
+    } else {
+      const b = $('#gemini-banner');
+      if (b) b.hidden = true;
+    }
   }
 
   // ---------------- layout & zoom ----------------
@@ -370,6 +379,100 @@ export class Editor {
     }
   }
 
+  async detectGeminiWatermark(manual = false) {
+    if (!this.current) return;
+    const imgId = this.current.id;
+    try {
+      if (manual) {
+        toast({ title: 'Scanning for Gemini watermark…', message: 'Analyzing corner regions and alpha signatures', type: 'info', timeout: 1500 });
+      }
+      const res = await api.detectGemini(imgId);
+      if (res && res.detected) {
+        this.lastGeminiDetection = res;
+        const banner = $('#gemini-banner');
+        if (banner) {
+          banner.hidden = false;
+          const info = $('#gb-info');
+          if (info) {
+            info.textContent = `${res.size}×${res.size} mark at (${res.bbox.left}, ${res.bbox.top}) · ${Math.round(res.confidence * 100)}% match`;
+          }
+        }
+        if (manual) {
+          toast({
+            title: 'Gemini Watermark Detected',
+            message: `Found ${res.size}×${res.size} mark. Click "Clean Losslessly" to restore original pixels.`,
+            type: 'success',
+            timeout: 4000,
+          });
+        }
+      } else {
+        this.lastGeminiDetection = null;
+        const banner = $('#gemini-banner');
+        if (banner) banner.hidden = true;
+        if (manual) {
+          toast({
+            title: 'No Gemini watermark detected',
+            message: 'No standard visible Gemini mark was found. You can paint over it manually.',
+            type: 'info',
+            timeout: 3500,
+          });
+        }
+      }
+    } catch (e) {
+      if (manual) toastError(e, 'Detection scan failed');
+    }
+  }
+
+  highlightGemini() {
+    if (!this.lastGeminiDetection || !this.lastGeminiDetection.bbox) {
+      toast({ title: 'No detection available', message: 'Detect a watermark first.', type: 'warn' });
+      return;
+    }
+    const { left, top, width, height } = this.lastGeminiDetection.bbox;
+    const cx = left + width / 2;
+    const cy = top + height / 2;
+    const stroke = {
+      mode: 'brush',
+      size: Math.max(width, height) * 1.1,
+      points: [[cx, cy]],
+    };
+    this.active.strokes.push(stroke);
+    this.pushHistory({ type: 'stroke' });
+    this.redrawMask();
+    this.updateUi();
+    toast({ title: 'Watermark highlighted', message: 'Marked on canvas. You can clean losslessly or inpaint.', type: 'info', timeout: 2500 });
+  }
+
+  async cleanGemini() {
+    if (this.busy || !this.active) return;
+    const item = this.active;
+    const from = item.cur;
+    const src = this.current;
+    this.setBusy(true);
+    this.root.classList.remove('sheet-open');
+    this.showProcessing('Restoring original image…', 'Engine: Lossless Reverse-Alpha Restorer');
+    this.setProcStage('Reconstructing underlying pixels…', null);
+    try {
+      const rec = await api.removeGemini(src.id, this.lastGeminiDetection);
+      this.setProcStage('Loading result…', null);
+      await api.loadImage(rec.url);
+      const banner = $('#gemini-banner');
+      if (banner) banner.hidden = true;
+      this.lastGeminiDetection = null;
+      this.commitVersion(item, from, rec);
+      toast({
+        title: 'Gemini watermark removed',
+        message: `Losslessly restored original pixels · ${(rec.processingMs / 1000).toFixed(2)} s`,
+        type: 'success',
+      });
+    } catch (e) {
+      toastError(e, 'Gemini removal failed');
+    } finally {
+      this.hideProcessing();
+      this.setBusy(false);
+    }
+  }
+
   commitVersion(item, from, rec) {
     item.versions.push(rec);
     const to = item.versions.length - 1;
@@ -401,6 +504,7 @@ export class Editor {
     if (i === 0) return 'Original';
     if (v.kind === 'inpaint') return `Step ${i} · Removed`;
     if (v.kind === 'enhance') return `Step ${i} · Enhanced ${v.scale}×`;
+    if (v.kind === 'gemini-remove') return `Step ${i} · Gemini Cleaned`;
     return `Step ${i}`;
   }
 
@@ -715,10 +819,18 @@ export class Editor {
         case 'zoom-fit': return this.setZoom(1);
         case 'inpaint': return this.runInpaint();
         case 'enhance': return this.runEnhance();
+        case 'detect-gemini': return this.detectGeminiWatermark(true);
         case 'download': return this.download();
         case 'sheet': return this.root.classList.toggle('sheet-open');
         case 'sheet-close': return this.root.classList.remove('sheet-open');
       }
+    });
+
+    $('#btn-clean-gemini')?.addEventListener('click', () => this.cleanGemini());
+    $('#btn-preview-gemini')?.addEventListener('click', () => this.highlightGemini());
+    $('#btn-dismiss-gemini')?.addEventListener('click', () => {
+      const b = $('#gemini-banner');
+      if (b) b.hidden = true;
     });
 
     $('#compare-against').addEventListener('change', (e) => this.showCompare(+e.target.value));
