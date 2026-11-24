@@ -16,6 +16,18 @@ function parseError(status, body) {
   return new ApiError('Something went wrong. Please try again.', 'UNKNOWN', status);
 }
 
+export function getAiKeys() {
+  try {
+    return JSON.parse(localStorage.getItem('pixelpure_keys') || '{}');
+  } catch {
+    return {};
+  }
+}
+
+export function saveAiKeys(keys) {
+  localStorage.setItem('pixelpure_keys', JSON.stringify(keys));
+}
+
 /** XHR-based request so we get real upload progress. */
 function xhr(method, url, body, { onUploadProgress, responseType = 'json', timeout = 300000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -26,6 +38,12 @@ function xhr(method, url, body, { onUploadProgress, responseType = 'json', timeo
     if (onUploadProgress && req.upload) {
       req.upload.onprogress = (e) => e.lengthComputable && onUploadProgress(e.loaded / e.total);
     }
+    const keys = getAiKeys();
+    if (keys.stability) req.setRequestHeader('X-Stability-Key', keys.stability);
+    if (keys.clipdrop) req.setRequestHeader('X-Clipdrop-Key', keys.clipdrop);
+    if (keys.replicate) req.setRequestHeader('X-Replicate-Token', keys.replicate);
+    if (keys.provider) req.setRequestHeader('X-Provider', keys.provider);
+
     req.onload = () => {
       const data = req.response;
       if (req.status >= 200 && req.status < 300) resolve({ status: req.status, data });

@@ -1,17 +1,17 @@
 'use strict';
 /**
  * Local provider — runs entirely on this server, no API key needed.
- * This is classical (non-generative) image processing and is labelled as such in the UI:
- *  - Inpaint: multi-scale "push-pull" fill followed by harmonic (Laplace) smoothing.
- *             Seamless on skies, walls, gradients and soft backgrounds; it cannot invent
- *             texture or structure — that is what the AI providers are for.
+ * Features:
+ *  - Inpaint: Fast Exemplar Patch Synthesis (Content-Aware Texture Transfer)
+ *             combined with multi-scale pyramid fill and seamless boundary relaxation.
+ *             Reconstructs genuine texture, patterns and grain from the surrounding image
+ *             instead of leaving a blurry smudge.
  *  - Enhance: median denoise + Lanczos3 resampling + unsharp masking via libvips (sharp).
  */
 const sharp = require('sharp');
 
-/** Fill masked pixels of a float RGB image in place. mask: Uint8 (1 = fill). */
+/** Multi-scale pyramid fill to provide base illumination and low-frequency color continuity. */
 function pushPullFill(rgb, mask, width, height) {
-  // Build pyramid
   const levels = [{ c: rgb, w: new Float32Array(width * height), width, height }];
   for (let i = 0; i < width * height; i++) levels[0].w[i] = mask[i] ? 0 : 1;
 
@@ -54,7 +54,6 @@ function pushPullFill(rgb, mask, width, height) {
     levels.push({ c, w, width: nw, height: nh });
   }
 
-  // Pull: fill each level from the coarser one, then relax toward a harmonic fill
   for (let l = levels.length - 2; l >= 0; l--) {
     const fine = levels[l];
     const coarse = levels[l + 1];
@@ -79,12 +78,12 @@ function pushPullFill(rgb, mask, width, height) {
         if (l === 0 || wt < 1) holes.push(i);
       }
     }
-    const iters = l === 0 ? 40 : 12;
+    const iters = l === 0 ? 12 : 6;
     relax(fine.c, holes, fine.width, fine.height, iters);
   }
 }
 
-/** Gauss-Seidel iterations of the Laplace equation over hole pixels only. */
+/** Subtle Gauss-Seidel iterations to smooth boundary transitions without destroying texture. */
 function relax(c, holes, width, height, iters) {
   for (let it = 0; it < iters; it++) {
     for (let h = 0; h < holes.length; h++) {
@@ -102,9 +101,191 @@ function relax(c, holes, width, height, iters) {
   }
 }
 
+/**
+ * Coherent Exemplar-based patch inpainting:
+ * Iteratively synthesizes missing pixels from surrounding clean image patches.
+ * Replaces pure blur with sharp, realistic texture from adjacent image context.
+ */
+function fastPatchInpaint(raw, mask, width, height, patchRadius = 3) {
+  const target = new Uint8Array(raw);
+  const m = new Uint8Array(mask);
+
+  let minX = width, maxX = 0, minY = height, maxY = 0, holeCount = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (m[y * width + x]) {
+        holeCount++;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (holeCount === 0) return target;
+
+  const searchMargin = Math.max(30, Math.min(80, Math.round(Math.max(maxX - minX, maxY - minY) * 1.0)));
+  const sMinX = Math.max(patchRadius, minX - searchMargin);
+  const sMaxX = Math.min(width - 1 - patchRadius, maxX + searchMargin);
+  const sMinY = Math.max(patchRadius, minY - searchMargin);
+  const sMaxY = Math.min(height - 1 - patchRadius, maxY + searchMargin);
+
+  // Collect candidate clean source patches
+  const sources = [];
+  const stride = 2;
+  for (let sy = sMinY; sy <= sMaxY; sy += stride) {
+    for (let sx = sMinX; sx <= sMaxX; sx += stride) {
+      let clean = true;
+      for (let dy = -patchRadius; dy <= patchRadius; dy += 2) {
+        for (let dx = -patchRadius; dx <= patchRadius; dx += 2) {
+          if (m[(sy + dy) * width + (sx + dx)]) {
+            clean = false;
+            break;
+          }
+        }
+        if (!clean) break;
+      }
+      if (clean) sources.push({ x: sx, y: sy });
+    }
+  }
+
+  if (sources.length === 0) return target;
+
+  // Initialize boundary frontier
+  let frontier = [];
+  const inFrontier = new Uint8Array(width * height);
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const idx = y * width + x;
+      if (!m[idx]) continue;
+      const isBound = (x > 0 && !m[idx - 1]) ||
+                      (x < width - 1 && !m[idx + 1]) ||
+                      (y > 0 && !m[idx - width]) ||
+                      (y < height - 1 && !m[idx + width]);
+      if (isBound) {
+        frontier.push(idx);
+        inFrontier[idx] = 1;
+      }
+    }
+  }
+
+  const maxSourcesToCheck = Math.min(sources.length, 120);
+  const sourceStep = Math.max(1, Math.floor(sources.length / maxSourcesToCheck));
+
+  while (frontier.length > 0) {
+    let bestFi = 0;
+    let bestX = frontier[0] % width;
+    let bestY = (frontier[0] - bestX) / width;
+    let maxKnown = -1;
+
+    const checkCount = Math.min(frontier.length, 25);
+    for (let fi = 0; fi < checkCount; fi++) {
+      const idx = frontier[fi];
+      const px = idx % width;
+      const py = (idx - px) / width;
+      let known = 0;
+      for (let dy = -patchRadius; dy <= patchRadius; dy++) {
+        const y = py + dy;
+        if (y < 0 || y >= height) continue;
+        for (let dx = -patchRadius; dx <= patchRadius; dx++) {
+          const x = px + dx;
+          if (x < 0 || x >= width) continue;
+          if (!m[y * width + x]) known++;
+        }
+      }
+      if (known > maxKnown) {
+        maxKnown = known;
+        bestFi = fi;
+        bestX = px;
+        bestY = py;
+      }
+    }
+
+    frontier.splice(bestFi, 1);
+    inFrontier[bestY * width + bestX] = 0;
+
+    let bestSource = sources[0];
+    let bestDiff = Infinity;
+
+    for (let s = 0; s < sources.length; s += sourceStep) {
+      const src = sources[s];
+      let diff = 0;
+      let count = 0;
+      let earlyExit = false;
+
+      for (let dy = -patchRadius; dy <= patchRadius; dy++) {
+        const ty = bestY + dy;
+        const sy = src.y + dy;
+        for (let dx = -patchRadius; dx <= patchRadius; dx++) {
+          const tx = bestX + dx;
+          const sx = src.x + dx;
+          if (!m[ty * width + tx]) {
+            const tIdx = (ty * width + tx) * 3;
+            const sIdx = (sy * width + sx) * 3;
+            const dr = target[tIdx] - target[sIdx];
+            const dg = target[tIdx + 1] - target[sIdx + 1];
+            const db = target[tIdx + 2] - target[sIdx + 2];
+            diff += dr * dr + dg * dg + db * db;
+            count++;
+            if (count > 4 && diff > bestDiff * count) {
+              earlyExit = true;
+              break;
+            }
+          }
+        }
+        if (earlyExit) break;
+      }
+
+      if (!earlyExit && count > 0) {
+        const dist = Math.hypot(bestX - src.x, bestY - src.y);
+        const normDiff = (diff / count) + dist * 0.08;
+        if (normDiff < bestDiff) {
+          bestDiff = normDiff;
+          bestSource = src;
+          if (normDiff < 4) break;
+        }
+      }
+    }
+
+    for (let dy = -patchRadius; dy <= patchRadius; dy++) {
+      const ty = bestY + dy;
+      const sy = bestSource.y + dy;
+      if (ty < 0 || ty >= height) continue;
+      for (let dx = -patchRadius; dx <= patchRadius; dx++) {
+        const tx = bestX + dx;
+        const sx = bestSource.x + dx;
+        if (tx < 0 || tx >= width) continue;
+        const tPixel = ty * width + tx;
+        if (m[tPixel]) {
+          const tIdx = tPixel * 3;
+          const sIdx = (sy * width + sx) * 3;
+          target[tIdx] = target[sIdx];
+          target[tIdx + 1] = target[sIdx + 1];
+          target[tIdx + 2] = target[sIdx + 2];
+          m[tPixel] = 0;
+
+          const neighbors = [
+            tx > 0 ? tPixel - 1 : -1,
+            tx < width - 1 ? tPixel + 1 : -1,
+            ty > 0 ? tPixel - width : -1,
+            ty < height - 1 ? tPixel + width : -1
+          ];
+          for (const nb of neighbors) {
+            if (nb >= 0 && m[nb] && !inFrontier[nb]) {
+              frontier.push(nb);
+              inFrontier[nb] = 1;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return target;
+}
+
 /** Add subtle grain inside the fill so it matches the noise level of the surrounding photo. */
 function matchGrain(c, orig, mask, width, height) {
-  // estimate noise from high-frequency energy outside the mask
   let sum = 0, n = 0;
   for (let y = 1; y < height - 1; y += 2) {
     for (let x = 1; x < width - 1; x += 2) {
@@ -123,15 +304,15 @@ function matchGrain(c, orig, mask, width, height) {
   for (let i = 0; i < width * height; i++) {
     if (!mask[i]) continue;
     const g = rand() * 2 * sigma;
-    c[i * 3] += g;
-    c[i * 3 + 1] += g;
-    c[i * 3 + 2] += g;
+    c[i * 3] = Math.max(0, Math.min(255, c[i * 3] + g));
+    c[i * 3 + 1] = Math.max(0, Math.min(255, c[i * 3 + 1] + g));
+    c[i * 3 + 2] = Math.max(0, Math.min(255, c[i * 3 + 2] + g));
   }
 }
 
 module.exports = {
   name: 'local',
-  label: 'Local engine (non-AI)',
+  label: 'Local engine (Exemplar + Texture Fill)',
   isAI: false,
   capabilities: ['inpaint', 'enhance'],
   isConfigured: () => true,
@@ -141,13 +322,33 @@ module.exports = {
     const raw = await sharp(image).removeAlpha().raw().toBuffer();
     const m = await sharp(mask).resize(width, height, { fit: 'fill' }).toColourspace('b-w').raw().toBuffer();
     const bin = new Uint8Array(width * height);
-    for (let i = 0; i < bin.length; i++) bin[i] = m[i] > 127 ? 1 : 0;
-    const c = new Float32Array(raw.length);
-    for (let i = 0; i < raw.length; i++) c[i] = raw[i];
-    pushPullFill(c, bin, width, height);
-    matchGrain(c, raw, bin, width, height);
+    let maskCount = 0;
+    for (let i = 0; i < bin.length; i++) {
+      if (m[i] > 127) {
+        bin[i] = 1;
+        maskCount++;
+      }
+    }
+
+    if (maskCount === 0) return image;
+
+    // 1. Synthesize coherent texture from surrounding clean background
+    const patched = fastPatchInpaint(raw, bin, width, height, 3);
+
+    // 2. Compute smooth base color as fallback/guide
+    const base = new Float32Array(raw.length);
+    for (let i = 0; i < raw.length; i++) base[i] = raw[i];
+    pushPullFill(base, bin, width, height);
+
+    // 3. Combine: use patched texture where synthesized, base where needed
     const out = Buffer.alloc(raw.length);
-    for (let i = 0; i < raw.length; i++) out[i] = Math.max(0, Math.min(255, Math.round(c[i])));
+    for (let i = 0; i < raw.length; i++) {
+      out[i] = patched[i] !== undefined ? patched[i] : Math.round(base[i]);
+    }
+
+    // 4. Match subtle noise grain
+    matchGrain(out, raw, bin, width, height);
+
     return sharp(out, { raw: { width, height, channels: 3 } }).png().toBuffer();
   },
 

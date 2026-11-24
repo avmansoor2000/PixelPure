@@ -17,8 +17,9 @@ const FAST_MAX_PIXELS = 1_048_576;
 const FAST_MAX_SIDE = 1536;
 const CONSERVATIVE_MAX_PIXELS = 9_437_184;
 
-function headers() {
-  return { Authorization: `Bearer ${cfg().apiKey}`, Accept: 'image/*' };
+function headers(userKey) {
+  const key = userKey || cfg().apiKey;
+  return { Authorization: `Bearer ${key}`, Accept: 'image/*' };
 }
 
 module.exports = {
@@ -28,7 +29,8 @@ module.exports = {
   capabilities: ['inpaint', 'enhance'],
   isConfigured: () => Boolean(cfg().apiKey),
 
-  async inpaint({ image, mask }) {
+  async inpaint({ image, mask, userKeys = {} }) {
+    const key = userKeys.stability || cfg().apiKey;
     const img = await fitWithin(image, { maxPixels: ERASE_MAX_PIXELS });
     const m = await sharp(mask).resize(img.width, img.height, { fit: 'fill' }).png().toBuffer();
     const form = new FormData();
@@ -38,14 +40,15 @@ module.exports = {
     form.append('output_format', 'png');
     const res = await request('stability', `${cfg().baseUrl}/v2beta/stable-image/edit/erase`, {
       method: 'POST',
-      headers: headers(),
+      headers: headers(key),
       body: form,
     });
     return Buffer.from(await res.arrayBuffer());
   },
 
   /** Returns an upscaled image; caller resizes to the exact target. */
-  async enhance({ image, width, height }) {
+  async enhance({ image, width, height, userKeys = {} }) {
+    const key = userKeys.stability || cfg().apiKey;
     const pixels = width * height;
     if (pixels <= FAST_MAX_PIXELS && Math.max(width, height) <= FAST_MAX_SIDE && Math.min(width, height) >= 32) {
       const form = new FormData();
@@ -53,7 +56,7 @@ module.exports = {
       form.append('output_format', 'png');
       const res = await request('stability', `${cfg().baseUrl}/v2beta/stable-image/upscale/fast`, {
         method: 'POST',
-        headers: headers(),
+        headers: headers(key),
         body: form,
       });
       return Buffer.from(await res.arrayBuffer());
@@ -67,7 +70,7 @@ module.exports = {
     form.append('output_format', 'png');
     const res = await request('stability', `${cfg().baseUrl}/v2beta/stable-image/upscale/conservative`, {
       method: 'POST',
-      headers: headers(),
+      headers: headers(key),
       body: form,
     });
     return Buffer.from(await res.arrayBuffer());

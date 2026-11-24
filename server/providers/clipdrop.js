@@ -20,7 +20,8 @@ module.exports = {
   capabilities: ['inpaint', 'enhance'],
   isConfigured: () => Boolean(cfg().apiKey),
 
-  async inpaint({ image, mask }) {
+  async inpaint({ image, mask, userKeys = {} }) {
+    const key = userKeys.clipdrop || cfg().apiKey;
     const img = await fitWithin(image, { maxPixels: MAX_INPUT_PIXELS });
     const m = await sharp(mask).resize(img.width, img.height, { fit: 'fill' }).png().toBuffer();
     const form = new FormData();
@@ -29,13 +30,14 @@ module.exports = {
     form.append('mode', 'quality');
     const res = await request('clipdrop', `${cfg().baseUrl}/cleanup/v1`, {
       method: 'POST',
-      headers: { 'x-api-key': cfg().apiKey },
+      headers: { 'x-api-key': key },
       body: form,
     });
     return Buffer.from(await res.arrayBuffer());
   },
 
-  async enhance({ image, targetWidth, targetHeight }) {
+  async enhance({ image, targetWidth, targetHeight, userKeys = {} }) {
+    const key = userKeys.clipdrop || cfg().apiKey;
     let tw = targetWidth;
     let th = targetHeight;
     const k = Math.min(1, UPSCALE_MAX_SIDE / Math.max(tw, th));
@@ -48,7 +50,7 @@ module.exports = {
     form.append('target_height', String(th));
     const res = await request('clipdrop', `${cfg().baseUrl}/image-upscaling/v1/upscale`, {
       method: 'POST',
-      headers: { 'x-api-key': cfg().apiKey, Accept: 'image/png' },
+      headers: { 'x-api-key': key, Accept: 'image/png' },
       body: form,
     });
     return Buffer.from(await res.arrayBuffer());

@@ -493,20 +493,86 @@ export class Editor {
 
   renderEngineChip() {
     const chip = $('#engine-chip');
+    if (!chip) return;
+    const userKeys = api.getAiKeys();
+    if (userKeys.provider === 'replicate' && userKeys.replicate) {
+      chip.className = 'engine-chip ai';
+      chip.textContent = 'AI · Replicate (LaMa)';
+      chip.title = 'Using Replicate LaMa model. Click to change.';
+      return;
+    }
+    if (userKeys.provider === 'clipdrop' && userKeys.clipdrop) {
+      chip.className = 'engine-chip ai';
+      chip.textContent = 'AI · Clipdrop';
+      chip.title = 'Using Clipdrop Cleanup API. Click to change.';
+      return;
+    }
+    if (userKeys.provider === 'stability' && userKeys.stability) {
+      chip.className = 'engine-chip ai';
+      chip.textContent = 'AI · Stability AI';
+      chip.title = 'Using Stability AI Erase API. Click to change.';
+      return;
+    }
+    if (userKeys.replicate) {
+      chip.className = 'engine-chip ai';
+      chip.textContent = 'AI · Replicate (LaMa)';
+      chip.title = 'Using Replicate LaMa model. Click to change.';
+      return;
+    }
+    if (userKeys.clipdrop) {
+      chip.className = 'engine-chip ai';
+      chip.textContent = 'AI · Clipdrop';
+      chip.title = 'Using Clipdrop Cleanup API. Click to change.';
+      return;
+    }
+    if (userKeys.stability) {
+      chip.className = 'engine-chip ai';
+      chip.textContent = 'AI · Stability AI';
+      chip.title = 'Using Stability AI Erase API. Click to change.';
+      return;
+    }
     const p = this.config.providers || {};
     const inp = p.inpaint || {};
     const enh = p.enhance || {};
     if (inp.isAI && enh.isAI) {
       chip.className = 'engine-chip ai';
       chip.textContent = inp.label === enh.label ? `AI · ${inp.label}` : `AI · ${inp.label} / ${enh.label}`;
+      chip.title = 'Server AI configured. Click to view settings.';
     } else if (inp.label || enh.label) {
       chip.className = 'engine-chip local';
-      chip.textContent = inp.isAI || enh.isAI ? 'Mixed engines' : 'Local engine · non-AI';
-      chip.title = 'No AI provider API key configured on the server — using classical processing.';
+      chip.textContent = inp.isAI || enh.isAI ? 'Mixed engines' : 'Local · Exemplar Fill';
+      chip.title = 'Using sharp Exemplar Patch Fill (no blur). Click to configure AI keys.';
     } else {
       chip.className = 'engine-chip';
       chip.textContent = 'Engine unavailable';
     }
+  }
+
+  openSettings() {
+    const modal = $('#settings-modal');
+    if (!modal) return;
+    const keys = api.getAiKeys();
+    $('#set-provider').value = keys.provider || 'auto';
+    $('#set-replicate').value = keys.replicate || '';
+    $('#set-clipdrop').value = keys.clipdrop || '';
+    $('#set-stability').value = keys.stability || '';
+    modal.hidden = false;
+  }
+
+  closeSettings() {
+    const modal = $('#settings-modal');
+    if (modal) modal.hidden = true;
+  }
+
+  saveSettings() {
+    const provider = $('#set-provider').value;
+    const replicate = $('#set-replicate').value.trim();
+    const clipdrop = $('#set-clipdrop').value.trim();
+    const stability = $('#set-stability').value.trim();
+    api.saveAiKeys({ provider, replicate, clipdrop, stability });
+    this.closeSettings();
+    this.renderEngineChip();
+    toast({ title: 'Settings saved', message: 'Engine preferences updated.', type: 'success', timeout: 2000 });
   }
 
   renderTray() {
@@ -656,6 +722,10 @@ export class Editor {
     });
 
     $('#compare-against').addEventListener('change', (e) => this.showCompare(+e.target.value));
+
+    $('#engine-chip')?.addEventListener('click', () => this.openSettings());
+    $$('[data-action="close-settings"]').forEach((b) => b.addEventListener('click', () => this.closeSettings()));
+    $('#btn-save-settings')?.addEventListener('click', () => this.saveSettings());
 
     window.addEventListener('resize', () => !this.root.hidden && this.layout());
 

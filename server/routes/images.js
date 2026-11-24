@@ -106,7 +106,13 @@ router.post('/images/:id/inpaint', processLimiter, upload.single('mask'), async 
   try {
     if (!storage.isValidId(req.params.id)) throw new AppError(404, 'NOT_FOUND', 'Image not found.');
     if (!req.file) throw new AppError(400, 'NO_MASK', 'Paint over the area you want to remove first.');
-    const rec = await processor.inpaint(req.params.id, req.file.buffer);
+    const userKeys = {
+      stability: req.headers['x-stability-key'],
+      clipdrop: req.headers['x-clipdrop-key'],
+      replicate: req.headers['x-replicate-token'],
+      provider: req.headers['x-provider'],
+    };
+    const rec = await processor.inpaint(req.params.id, req.file.buffer, { userKeys });
     res.status(201).json({ image: publicRecord(rec) });
   } catch (e) {
     next(e);
@@ -119,10 +125,17 @@ router.post('/images/:id/enhance', processLimiter, express.json({ limit: '2kb' }
     if (!storage.isValidId(req.params.id)) throw new AppError(404, 'NOT_FOUND', 'Image not found.');
     const body = req.body || {};
     const scale = Number(body.scale ?? 2);
+    const userKeys = {
+      stability: req.headers['x-stability-key'],
+      clipdrop: req.headers['x-clipdrop-key'],
+      replicate: req.headers['x-replicate-token'],
+      provider: req.headers['x-provider'],
+    };
     const rec = await processor.enhance(req.params.id, {
       scale,
       denoise: body.denoise !== false,
       autoLight: body.autoLight !== false,
+      userKeys,
     });
     res.status(201).json({ image: publicRecord(rec) });
   } catch (e) {

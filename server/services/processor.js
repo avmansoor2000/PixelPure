@@ -29,8 +29,8 @@ async function loadSource(id) {
 }
 
 /** Run the configured provider for a capability, logging upstream failures server-side. */
-async function runWithProvider(capability, fn) {
-  const provider = providers.resolve(capability);
+async function runWithProvider(capability, fn, userKeys = {}) {
+  const provider = providers.resolve(capability, userKeys);
   const started = Date.now();
   try {
     const out = await fn(provider);
@@ -43,7 +43,7 @@ async function runWithProvider(capability, fn) {
   }
 }
 
-async function inpaint(sourceId, maskBuffer) {
+async function inpaint(sourceId, maskBuffer, { userKeys = {} } = {}) {
   const { meta, buffer } = await loadSource(sourceId);
   const { width, height } = meta;
   const { mask, coverage } = await img.prepareMask(maskBuffer, width, height);
@@ -52,7 +52,7 @@ async function inpaint(sourceId, maskBuffer) {
   }
 
   return withSlot(async () => {
-    const { out, provider, ms } = await runWithProvider('inpaint', (p) => p.inpaint({ image: buffer, mask, width, height }));
+    const { out, provider, ms } = await runWithProvider('inpaint', (p) => p.inpaint({ image: buffer, mask, width, height, userKeys }), userKeys);
     const composed = await img.compositeMasked(buffer, out, mask, width, height);
     const rec = await storage.save(composed, {
       width,
@@ -82,7 +82,7 @@ function computeTarget(width, height, scale) {
   return { targetWidth: tw, targetHeight: th, capped: k < 1 };
 }
 
-async function enhance(sourceId, { scale = 2, denoise = true, autoLight = true } = {}) {
+async function enhance(sourceId, { scale = 2, denoise = true, autoLight = true, userKeys = {} } = {}) {
   if (![1, 2, 4].includes(scale)) throw new AppError(400, 'BAD_SCALE', 'Scale must be 1, 2 or 4.');
   const { meta, buffer } = await loadSource(sourceId);
   const { width, height } = meta;
@@ -91,7 +91,8 @@ async function enhance(sourceId, { scale = 2, denoise = true, autoLight = true }
   return withSlot(async () => {
     const providerScale = scale === 1 ? 2 : scale; // 1x = enhance-only: upscale through the model, then back down
     const { out, provider, ms } = await runWithProvider('enhance', (p) =>
-      p.enhance({ image: buffer, width, height, scale: providerScale, targetWidth, targetHeight, options: { denoise } })
+      p.enhance({ image: buffer, width, height, scale: providerScale, targetWidth, targetHeight, options: { denoise }, userKeys }),
+      userKeys
     );
     let result = await img.resizeExact(out, targetWidth, targetHeight);
     if (autoLight) result = await img.autoTone(result, { light: true, clarity: true });

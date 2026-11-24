@@ -318,7 +318,7 @@
         <strong id="ed-name">image</strong>
         <span id="ed-dims" class="muted"></span>
       </div>
-      <span class="engine-chip" id="engine-chip" title="Processing engine"></span>
+      <button class="engine-chip" id="engine-chip" title="Click to configure AI engine" type="button"></button>
       <div class="ed-top-right">
         <div class="seg" role="tablist" aria-label="View">
           <button role="tab" aria-selected="true" data-view="edit">Edit</button>
@@ -448,6 +448,51 @@
       <p class="proc-title">Uploading…</p>
       <div class="progress"><div class="progress-bar" id="upload-bar"></div></div>
       <p class="muted small" id="upload-pct">0%</p>
+    </div>
+  </div>
+
+  <div class="settings-modal" id="settings-modal" hidden role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="settings-backdrop" data-action="close-settings"></div>
+    <div class="settings-dialog">
+      <div class="settings-head">
+        <h3 id="settings-title">AI Engine Settings</h3>
+        <button class="icon-btn" data-action="close-settings" aria-label="Close settings" type="button">
+          <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="settings-body">
+        <p class="muted small">PixelPure uses built-in <strong>Exemplar Patch Inpainting</strong> to eliminate blur. For deep-learning neural watermark removal, you can optionally provide an API key. Keys are saved in your browser and never stored on the server.</p>
+        
+        <div class="form-group">
+          <label for="set-provider">Active Provider</label>
+          <select id="set-provider" class="form-select">
+            <option value="auto">Auto (First available AI or Local)</option>
+            <option value="replicate">Replicate (LaMa AI - Best for Watermarks)</option>
+            <option value="clipdrop">Clipdrop (Cleanup API)</option>
+            <option value="stability">Stability AI (Erase API)</option>
+            <option value="local">Local Engine (Fast Exemplar Patch Fill)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="set-replicate">Replicate API Token <span class="muted small">(r8_...)</span></label>
+          <input type="password" id="set-replicate" placeholder="Optional: r8_..." class="form-input" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+          <label for="set-clipdrop">Clipdrop API Key</label>
+          <input type="password" id="set-clipdrop" placeholder="Optional: Clipdrop key" class="form-input" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+          <label for="set-stability">Stability AI Key <span class="muted small">(sk-...)</span></label>
+          <input type="password" id="set-stability" placeholder="Optional: sk-..." class="form-input" autocomplete="off">
+        </div>
+      </div>
+      <div class="settings-footer">
+        <button class="btn btn-ghost" data-action="close-settings" type="button">Cancel</button>
+        <button class="btn btn-primary" id="btn-save-settings" type="button">Save Settings</button>
+      </div>
     </div>
   </div>
 

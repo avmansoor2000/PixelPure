@@ -67,7 +67,7 @@ async function prepareMask(maskBuffer, width, height) {
   for (let i = 0, j = 0; j < px; i += info.channels, j++) {
     const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
     const a = data[i + 3];
-    const on = a > 32 && lum > 32;
+    const on = a > 24 && (lum > 24 || a > 64);
     if (on) {
       bin[j] = 255;
       count++;
@@ -77,23 +77,41 @@ async function prepareMask(maskBuffer, width, height) {
     throw new AppError(422, 'EMPTY_MASK', 'Paint over the watermark or object you want to remove first.');
   }
 
-  const grow = Math.max(2, Math.round(Math.min(width, height) / 400));
-  // Dilate: blur then threshold low. These must be separate pipelines because
-  // sharp applies threshold before blur within a single pipeline.
-  const blurred = await sharp(bin, { raw: { width, height, channels: 1 } }).blur(grow).extractChannel(0).raw().toBuffer();
-  const grown = await sharp(blurred, { raw: { width, height, channels: 1 } }).threshold(8).toColourspace('b-w').png().toBuffer();
+  // Controlled morphological dilation (1-2px) instead of heavy blur + threshold(8).
+  // A tight 1-2px dilation covers antialiased edges without creating a huge blurry halo outside the watermark.
+  const radius = Math.min(2, Math.max(1, Math.round(Math.min(width, height) / 800)));
+  const grown = Buffer.from(bin);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (bin[y * width + x] === 255) {
+        for (let dy = -radius; dy <= radius; dy++) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= height) continue;
+          for (let dx = -radius; dx <= radius; dx++) {
+            const nx = x + dx;
+            if (nx < 0 || nx >= width) continue;
+            grown[ny * width + nx] = 255;
+          }
+        }
+      }
+    }
+  }
+  const grownPng = await sharp(grown, { raw: { width, height, channels: 1 } })
+    .toColourspace('b-w')
+    .png()
+    .toBuffer();
 
-  return { mask: grown, coverage: count / px };
+  return { mask: grownPng, coverage: count / px };
 }
 
 /**
  * Blend the provider output into the original so pixels outside the
- * selection stay bit-identical. A slightly feathered mask hides seams.
+ * selection stay bit-identical. A clean, subtle feather hides seams without blurring outside.
  */
 async function compositeMasked(originalPng, resultBuffer, maskPng, width, height) {
   const result = await sharp(resultBuffer).resize(width, height, { fit: 'fill', kernel: 'lanczos3' }).removeAlpha().toBuffer();
-  const feather = Math.max(1, Math.round(Math.min(width, height) / 800));
-  const alpha = await sharp(maskPng).resize(width, height, { fit: 'fill' }).blur(feather + 0.3).toColourspace('b-w').raw().toBuffer();
+  // Feather just enough (0.8px) for clean antialiased blending at the boundary
+  const alpha = await sharp(maskPng).resize(width, height, { fit: 'fill' }).blur(0.8).toColourspace('b-w').raw().toBuffer();
   const overlay = await sharp(result).joinChannel(alpha, { raw: { width, height, channels: 1 } }).png().toBuffer();
 
   const orig = sharp(originalPng);
